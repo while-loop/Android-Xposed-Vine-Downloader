@@ -16,25 +16,26 @@ import android.widget.Toast;
 import java.io.File;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
+import java.util.Map;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.IXposedHookZygoteInit;
 import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XSharedPreferences;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.callStaticMethod;
-import static de.robv.android.xposed.XposedHelpers.findClass;
 
-
-public class VineDownloader implements IXposedHookLoadPackage {
+public class VineDownloader implements IXposedHookLoadPackage, IXposedHookZygoteInit {
 
     private static int VINE_ACTIVITY_RESULT = 999;
     private static int VINE_DOWNLOADER_RESULT = 99;
     private static int VINE_POST_ID_ERROR = -91;
 
-    private static String PACKAGE_NAME = "co.vine.android";
+    String PACKAGE_NAME = VineDownloader.class.getPackage().getName();
+
+    XSharedPreferences xSharedPreferences;
 
     private Context mContext;
     private long mPostId;
@@ -42,12 +43,15 @@ public class VineDownloader implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(LoadPackageParam lpparam) throws Throwable {
 
-        if (!lpparam.packageName.equals(PACKAGE_NAME)) {
+        if (!lpparam.packageName.equals(Constants.PACKAGE_NAME)) {
             return;
         }
 
         final Constructor<?> optionConstructor = XposedHelpers.findConstructorExact(XposedHelpers.findClass("co.vine.android.PostOptionsDialogActivity$Option", lpparam.classLoader), int.class, String.class);
         Class<?> postOptionsDialogActivityClass = XposedHelpers.findClass("co.vine.android.PostOptionsDialogActivity", lpparam.classLoader);
+
+
+        log("PACKAGE_NAME: " + PACKAGE_NAME);
 
         /**
          *  Before the invalidateOptions method starts, add the Download option to the ArrayList
@@ -132,9 +136,7 @@ public class VineDownloader implements IXposedHookLoadPackage {
                 Object mFeedAdapter = XposedHelpers.getObjectField(param.thisObject, "mFeedAdapter");
                 ArrayList<?> vinePostArray = null;
 
-                final Object activityThread = callStaticMethod(findClass("android.app.ActivityThread", null), "currentActivityThread");
-                final Context context = (Context) callMethod(activityThread, "getSystemContext");
-                final String appVersionString = context.getPackageManager().getPackageInfo(PACKAGE_NAME, 0).versionName;
+                final String appVersionString = mContext.getPackageManager().getPackageInfo(Constants.PACKAGE_NAME, 0).versionName;
 
                 if (versionCompare("3.3.15", appVersionString) > 0) { //versions under 3.3.15 aka, old feedadapter
                     Object mFeedAdapterPosts = XposedHelpers.getObjectField(mFeedAdapter, "mPosts");
@@ -166,8 +168,7 @@ public class VineDownloader implements IXposedHookLoadPackage {
 
                 assert vinePost != null;
                 String videoUrl = (String) XposedHelpers.getObjectField(vinePost, "videoUrl");
-                //XposedBridge.log("videoUrl: " + videoUrl);
-
+                //log("videoUrl: " + videoUrl);
                 if (videoUrl != null && videoUrl.isEmpty()) {
                     videoUrl = (String) XposedHelpers.getObjectField(vinePost, "videoLowURL");
 
@@ -179,7 +180,16 @@ public class VineDownloader implements IXposedHookLoadPackage {
 
                 Toast.makeText(VineDownloader.this.mContext, "Downloading video", Toast.LENGTH_SHORT).show();
                 String description = (String) XposedHelpers.getObjectField(vinePost, "description");
-                File directory = new File(new StringBuilder(String.valueOf(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath())).append("/Vine").toString());
+
+                xSharedPreferences.reload();
+                xSharedPreferences.makeWorldReadable();
+
+                String def = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath() + "/Vine";
+                String dir = xSharedPreferences.getString(Constants.DOWNLOAD_LOCATION_KEY, def);
+                if (dir.charAt(dir.length()-1) != '/') {
+                    dir += '/';
+                }
+                File directory = new File(dir);
                 if (!directory.exists()) {
                     directory.mkdirs();
                 }
@@ -189,49 +199,61 @@ public class VineDownloader implements IXposedHookLoadPackage {
                 request.setTitle(description);
                 request.allowScanningByMediaScanner();
                 request.setNotificationVisibility(1);
-                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Vine/" + postId + ".mp4");
+                String fileName = postId + ".mp4";
+                dir = "file:" + dir + fileName;
+                request.setDestinationUri(Uri.parse(dir));
+                //log("uri" + Uri.parse(dir).toString());
                 ((DownloadManager) VineDownloader.this.mContext.getSystemService(Context.DOWNLOAD_SERVICE)).enqueue(request);
                 param.setResult(false);
             }
         });
     }
 
+    private void toast(String s) {
+        Toast.makeText(VineDownloader.this.mContext, s, Toast.LENGTH_SHORT).show();
+    }
+
+    private void log(String s) {
+        XposedBridge.log(s);
+    }
+
     /**
      * http://stackoverflow.com/a/6702029
      * Compares two version strings.
-     *
+     * <p>
      * Use this instead of String.compareTo() for a non-lexicographical
      * comparison that works for version strings. e.g. "1.10".compareTo("1.6").
-     *
-     * @note It does not work if "1.10" is supposed to be equal to "1.10.0".
      *
      * @param str1 a string of ordinal numbers separated by decimal points.
      * @param str2 a string of ordinal numbers separated by decimal points.
      * @return The result is a negative integer if str1 is _numerically_ less than str2.
-     *         The result is a positive integer if str1 is _numerically_ greater than str2.
-     *         The result is zero if the strings are _numerically_ equal.
+     * The result is a positive integer if str1 is _numerically_ greater than str2.
+     * The result is zero if the strings are _numerically_ equal.
+     * @note It does not work if "1.10" is supposed to be equal to "1.10.0".
      */
-    public Integer versionCompare(String str1, String str2)
-    {
+    public Integer versionCompare(String str1, String str2) {
         String[] vals1 = str1.split("\\.");
         String[] vals2 = str2.split("\\.");
         int i = 0;
         // set index to first non-equal ordinal or length of shortest version string
-        while (i < vals1.length && i < vals2.length && vals1[i].equals(vals2[i]))
-        {
+        while (i < vals1.length && i < vals2.length && vals1[i].equals(vals2[i])) {
             i++;
         }
         // compare first non-equal ordinal number
-        if (i < vals1.length && i < vals2.length)
-        {
+        if (i < vals1.length && i < vals2.length) {
             int diff = Integer.valueOf(vals1[i]).compareTo(Integer.valueOf(vals2[i]));
             return Integer.signum(diff);
         }
         // the strings are equal or one string is a substring of the other
         // e.g. "1.2.3" = "1.2.3" or "1.2.3" < "1.2.3.4"
-        else
-        {
+        else {
             return Integer.signum(vals1.length - vals2.length);
         }
+    }
+
+    @Override
+    public void initZygote(StartupParam startupParam) throws Throwable {
+        xSharedPreferences = new XSharedPreferences(PACKAGE_NAME);
+        xSharedPreferences.makeWorldReadable();
     }
 }

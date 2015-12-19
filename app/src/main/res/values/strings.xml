@@ -1,3 +1,30 @@
 <resources>
     <string name="app_name">Vine Downloader</string>
+    <string name="title_activity_settings">Settings</string>
+
+    <!-- Strings related to Settings -->
+
+    <string name="none">None</string>
+    <string name="latest">Latest Download</string>
+    <string name="all">All</string>
+
+    <string name="notification_amount_key">notification_key</string>
+    <string name="notification_amount_title">Notification Limit</string>
+    <string name="notification_amount_summary">Determine the amount of notifcations recieve when downloading Vine videos</string>
+    <string name="download_location_key">download_location_et</string>
+    <string name="download_location_summary">Determine the directory to save Vine videos</string>
+    <string name="download_location_title">Video Directory</string>
+    <string name="launch_vine">Launch Vine</string>
+    <string name="request_read_ext_message">In order to choose a directory, the Read External Storage permission must be granted</string>
+    <string name="request_read_ext_title">Read External Storage Permission</string>
+    <string name="grant">Grant</string>
+    <string name="deny">Deny</string>
+    <string name="cancel">Cancel</string>
+
+    <string-array name="notification_amount_list">
+        <item>@string/none</item>
+        <item>@string/latest</item>
+        <item>@string/all</item>
+    </string-array>
+
 </resources>
